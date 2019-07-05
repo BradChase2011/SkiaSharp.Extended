@@ -29,15 +29,23 @@ namespace SkiaSharp.Extended.Svg
 		private readonly Dictionary<string, XElement> defs = new Dictionary<string, XElement>();
 		private readonly Dictionary<string, ISKSvgFill> fillDefs = new Dictionary<string, ISKSvgFill>();
 		private readonly Dictionary<XElement, string> elementFills = new Dictionary<XElement, string>();
+
+		private readonly Dictionary<SKColor, SKColor> replacementColors = new Dictionary<SKColor, SKColor>();
+
+
 		private readonly XmlReaderSettings xmlReaderSettings = new XmlReaderSettings()
 		{
 			DtdProcessing = DtdProcessing.Ignore,
 			IgnoreComments = true,
 		};
 
-		public SKSvg()
-			: this(DefaultPPI, SKSize.Empty)
+		public SKSvg() : this(DefaultPPI, SKSize.Empty)
 		{
+		}
+
+		public SKSvg(Dictionary<SKColor, SKColor> colorsToReplace) : this(DefaultPPI, SKSize.Empty)
+		{
+			replacementColors = colorsToReplace;
 		}
 
 		public SKSvg(float pixelsPerInch)
@@ -849,6 +857,9 @@ namespace SkiaSharp.Extended.Svg
 
 					if (ColorHelper.TryParse(stroke, out SKColor color))
 					{
+						if (replacementColors.ContainsKey(color))
+							color = replacementColors[color];
+
 						// preserve alpha
 						if (color.Alpha == 255 && strokePaint.Color.Alpha > 0)
 							strokePaint.Color = color.WithAlpha(strokePaint.Color.Alpha);
@@ -944,6 +955,9 @@ namespace SkiaSharp.Extended.Svg
 
 					if (ColorHelper.TryParse(fill, out var color))
 					{
+						if (replacementColors.ContainsKey(color))
+							color = replacementColors[color];
+
 						// preserve alpha
 						if (color.Alpha == 255 && fillPaint.Color.Alpha > 0)
 							fillPaint.Color = color.WithAlpha(fillPaint.Color.Alpha);
@@ -1343,6 +1357,8 @@ namespace SkiaSharp.Extended.Svg
 				if (style.TryGetValue("stop-color", out string stopColor))
 				{
 					ColorHelper.TryParse(stopColor, out color);
+					if (replacementColors.ContainsKey(color))
+						color = replacementColors[color];
 				}
 
 				if (style.TryGetValue("stop-opacity", out string stopOpacity))

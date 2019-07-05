@@ -9,6 +9,9 @@ namespace SkiaSharp.Extended.Svg
 
 		public static bool TryParse(string str, out SKColor color)
 		{
+			if( !String.IsNullOrEmpty(str) )
+				str = str.ToLower();
+
 			if (str.StartsWith("rgb(", StringComparison.Ordinal))
 			{
 				str = str.Substring(4, str.Length - 4).TrimEnd(')');
@@ -19,7 +22,7 @@ namespace SkiaSharp.Extended.Svg
 				str = $"#{r:X2}{g:X2}{b:X2}";
 			}
 
-			if (!SKColor.TryParse(str, out color))
+			if (!SKColor.TryParse(str.ToLower(), out color))
 			{
 				string hexString = null;
 				if (HexValues.TryGetValue(str, out hexString))
