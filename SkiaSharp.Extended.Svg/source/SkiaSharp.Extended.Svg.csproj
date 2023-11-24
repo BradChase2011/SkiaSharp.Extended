@@ -1,12 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;netstandard1.3</TargetFrameworks>
+    <TargetFrameworks>netstandard2;netstandard2.1;net8.0-windows;net8.0-android</TargetFrameworks>
     <AssemblyName>SkiaSharp.Extended.Svg</AssemblyName>
     <RootNamespace>SkiaSharp.Extended.Svg</RootNamespace>
-    <AssemblyVersion>1.68.0.0</AssemblyVersion>
-    <AssemblyFileVersion>1.68.0.0</AssemblyFileVersion>
-    <Version>1.68.0</Version>
+    <AssemblyVersion>1.69.0.0</AssemblyVersion>
+    <AssemblyFileVersion>1.69.0.0</AssemblyFileVersion>
+    <Version>1.69.0</Version>
     <Product>$(AssemblyName) ($(TargetFramework))</Product>
     <NeutralLanguage>en</NeutralLanguage>
     <DefineConstants>$(DefineConstants);</DefineConstants>
@@ -29,10 +29,6 @@
     <RepositoryUrl>https://go.microsoft.com/fwlink/?linkid=2071915</RepositoryUrl>
   </PropertyGroup>
 
-  <PropertyGroup Condition=" $(TargetFramework.StartsWith('netstandard')) ">
-    <DefineConstants>$(DefineConstants);NET_STANDARD;</DefineConstants>
-  </PropertyGroup>
-
   <PropertyGroup Condition=" '$(Configuration)'=='Debug' ">
     <DebugType>full</DebugType>
     <DebugSymbols>true</DebugSymbols>
@@ -42,11 +38,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="MSBuild.Sdk.Extras" Version="1.6.55" PrivateAssets="All" />
-    <PackageReference Include="SkiaSharp" Version="1.68.0" />
+    <PackageReference Include="SkiaSharp" Version="3.0.0" />
   </ItemGroup>
-
-  <Import Project="$(MSBuildSDKExtrasTargets)" Condition="Exists('$(MSBuildSDKExtrasTargets)')" />
-  <Import Project="$(MSBuildThisFileDirectory)..\..\Signing.targets" />
-
 </Project>
