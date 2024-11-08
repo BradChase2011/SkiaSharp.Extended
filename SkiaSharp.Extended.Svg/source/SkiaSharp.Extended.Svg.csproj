@@ -1,12 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;netstandard2.1;net8.0-windows;net8.0-android</TargetFrameworks>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net8.0-windows;net8.0-android;net9.0-windows;net9.0-android;net9.0-ios;net9.0-maccatalyst</TargetFrameworks>
     <AssemblyName>SkiaSharp.Extended.Svg</AssemblyName>
     <RootNamespace>SkiaSharp.Extended.Svg</RootNamespace>
-    <AssemblyVersion>1.70.0.0</AssemblyVersion>
-    <AssemblyFileVersion>1.70.0.0</AssemblyFileVersion>
-    <Version>1.70.0</Version>
+    <AssemblyVersion>1.71.0.0</AssemblyVersion>
+    <AssemblyFileVersion>1.71.0.0</AssemblyFileVersion>
+    <Version>1.71.0</Version>
     <Product>$(AssemblyName) ($(TargetFramework))</Product>
     <NeutralLanguage>en</NeutralLanguage>
     <DefineConstants>$(DefineConstants);</DefineConstants>
