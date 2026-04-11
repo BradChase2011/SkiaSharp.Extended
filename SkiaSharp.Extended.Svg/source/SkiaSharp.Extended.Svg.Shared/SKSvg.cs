@@ -31,7 +31,7 @@ namespace SkiaSharp.Extended.Svg
 		private readonly Dictionary<XElement, string> elementFills = new Dictionary<XElement, string>();
 
 		private readonly Dictionary<SKColor, SKColor> replacementColors = new Dictionary<SKColor, SKColor>();
-
+		private XElement _RootElement = null;
 
 		private readonly XmlReaderSettings xmlReaderSettings = new XmlReaderSettings()
 		{
@@ -110,10 +110,11 @@ namespace SkiaSharp.Extended.Svg
 			manager.AddNamespace("xlink", xlink.NamespaceName);
 			return new XmlParserContext(null, manager, null, XmlSpace.None);
 		}
-
+		
 		private SKPicture Load(XDocument xdoc)
 		{
 			var svg = xdoc.Root;
+			_RootElement = svg;
 			var ns = svg.Name.Namespace;
 
 			// find the defs (gradients) - and follow all hrefs
@@ -211,6 +212,48 @@ namespace SkiaSharp.Extended.Svg
 			}
 
 			return Picture;
+		}
+
+		public List<SKPath> GetPaths()
+		{
+			if (Picture == null)
+				return new List<SKPath>();
+
+			List<SKPath> paths = new List<SKPath>();
+			XNamespace ns = svg;
+
+			// walk all descendant elements that can produce paths
+			foreach (var e in _RootElement.Descendants())
+			{
+				SKPath path = ReadElement(e);
+				if (path != null && !path.IsEmpty)
+					paths.Add(path);
+			}
+
+			return paths;
+		}
+
+		public List<(SKPath Path, SKPaint StrokePaint)> GetPathsWithPaint()
+		{
+			if (Picture == null)
+				return new List<(SKPath, SKPaint)>();
+
+			List<(SKPath, SKPaint)> results = new List<(SKPath, SKPaint)>();
+
+			foreach (XElement e in _RootElement.Descendants())
+			{
+				SKPath path = ReadElement(e);
+				if (path == null || path.IsEmpty)
+					continue;
+
+				SKPaint stroke = null;
+				SKPaint fill = CreatePaint();
+				ReadPaints(e, ref stroke, ref fill, false);
+
+				results.Add((path, stroke));
+			}
+
+			return results;
 		}
 
 		private void LoadElements(IEnumerable<XElement> elements, SKCanvas canvas, SKPaint stroke, SKPaint fill)
