@@ -29,7 +29,8 @@ namespace SkiaSharp.Extended.Svg
 		private readonly Dictionary<string, XElement> defs = new Dictionary<string, XElement>();
 		private readonly Dictionary<string, ISKSvgFill> fillDefs = new Dictionary<string, ISKSvgFill>();
 		private readonly Dictionary<XElement, string> elementFills = new Dictionary<XElement, string>();
-
+		private readonly Dictionary<XElement, string> elementStrokes = new Dictionary<XElement, string>();
+		private readonly Dictionary<string, SKSvgGradientInfo> gradientDefs = new Dictionary<string, SKSvgGradientInfo>();
 		private readonly Dictionary<SKColor, SKColor> replacementColors = new Dictionary<SKColor, SKColor>();
 		private XElement _RootElement = null;
 
@@ -233,27 +234,111 @@ namespace SkiaSharp.Extended.Svg
 			return paths;
 		}
 
-		public List<(SKPath Path, SKPaint StrokePaint)> GetPathsWithPaint()
+		public List<(SKPath Path, SKPaint StrokePaint, SKPaint FillPaint, SKSvgGradientInfo Gradient, SKSvgGradientInfo StrokeGradient)> GetPathsWithPaint()
 		{
-			if (Picture == null)
-				return new List<(SKPath, SKPaint)>();
+			List<(SKPath, SKPaint, SKPaint, SKSvgGradientInfo, SKSvgGradientInfo)> results = new List<(SKPath, SKPaint, SKPaint, SKSvgGradientInfo, SKSvgGradientInfo)>();
 
-			List<(SKPath, SKPaint)> results = new List<(SKPath, SKPaint)>();
+			if (Picture == null || _RootElement == null)
+				return results;
 
-			foreach (XElement e in _RootElement.Descendants())
-			{
-				SKPath path = ReadElement(e);
-				if (path == null || path.IsEmpty)
-					continue;
-
-				SKPaint stroke = null;
-				SKPaint fill = CreatePaint();
-				ReadPaints(e, ref stroke, ref fill, false);
-
-				results.Add((path, stroke));
-			}
+			ReadPathsWithPaint(_RootElement, SKMatrix.CreateIdentity(), null, CreatePaint(), results);
 
 			return results;
+		}
+
+		private void ReadPathsWithPaint(XElement e, SKMatrix in_Transform, SKPaint in_Stroke, SKPaint in_Fill, List<(SKPath, SKPaint, SKPaint, SKSvgGradientInfo, SKSvgGradientInfo)> out_Results)
+		{
+			if (e == null || e.Attribute("display")?.Value == "none")
+				return;
+
+			SKMatrix local = ReadTransform(e.Attribute("transform")?.Value ?? string.Empty);
+			SKMatrix transform = SKMatrix.CreateIdentity();
+			SKMatrix.Concat(ref transform, in_Transform, local);
+
+			string elementName = e.Name.LocalName;
+			bool isGroup = elementName == "g";
+
+			SKPaint stroke = in_Stroke?.Clone();
+			SKPaint fill = in_Fill?.Clone();
+
+			Dictionary<string, string> style = ReadPaints(e, ref stroke, ref fill, isGroup);
+
+			switch (elementName)
+			{
+				case "svg":
+				case "g":
+				case "switch":
+					{
+						foreach (XElement child in e.Elements())
+						{
+							ReadPathsWithPaint(child, transform, stroke, fill, out_Results);
+						}
+
+						break;
+					}
+
+				case "use":
+					{
+						XElement href = ReadHref(e);
+
+						if (href == null)
+							break;
+
+						href = new XElement(href);
+
+						foreach (XAttribute attribute in e.Attributes())
+						{
+							string name = attribute.Name.LocalName;
+
+							if (!name.Equals("href", StringComparison.OrdinalIgnoreCase) && !name.Equals("id", StringComparison.OrdinalIgnoreCase) && !name.Equals("transform", StringComparison.OrdinalIgnoreCase))
+								href.SetAttributeValue(attribute.Name, attribute.Value);
+						}
+
+						ReadPathsWithPaint(href, transform, stroke, fill, out_Results);
+						break;
+					}
+
+				case "defs":
+				case "title":
+				case "desc":
+				case "description":
+				case "image":
+				case "text":
+					break;
+
+				default:
+					{
+						if (stroke == null && fill == null)
+							break;
+
+						SKPath path = ReadElement(e, style);
+
+						if (path == null || path.IsEmpty)
+							break;
+
+						if (!transform.IsIdentity)
+							path.Transform(transform);
+
+						SKSvgGradientInfo gradient = null;
+
+						if (elementFills.TryGetValue(e, out string fillId))
+							gradientDefs.TryGetValue(fillId, out gradient);
+
+						if (gradient != null)
+							gradient = gradient.WithBounds(path.TightBounds);
+
+						SKSvgGradientInfo strokeGradient = null;
+
+						if (elementStrokes.TryGetValue(e, out string strokeFillId))
+							gradientDefs.TryGetValue(strokeFillId, out strokeGradient);
+
+						if (strokeGradient != null)
+							strokeGradient = strokeGradient.WithBounds(path.TightBounds);
+
+						out_Results.Add((path, stroke, fill, gradient, strokeGradient));
+						break;
+					}
+			}
 		}
 
 		private void LoadElements(IEnumerable<XElement> elements, SKCanvas canvas, SKPaint stroke, SKPaint fill)
@@ -866,17 +951,21 @@ namespace SkiaSharp.Extended.Svg
 		{
 			var style = ReadStyle(e);
 
-			ReadPaints(style, ref stroke, ref fill, isGroup, out var fillId);
+			ReadPaints(style, ref stroke, ref fill, isGroup, out var fillId, out var strokeId);
 
 			if (fillId != null)
 				elementFills[e] = fillId;
 
+			if (strokeId != null)
+				elementStrokes[e] = strokeId;
+
 			return style;
 		}
 
-		private void ReadPaints(Dictionary<string, string> style, ref SKPaint strokePaint, ref SKPaint fillPaint, bool isGroup, out string fillId)
+		private void ReadPaints(Dictionary<string, string> style, ref SKPaint strokePaint, ref SKPaint fillPaint, bool isGroup, out string fillId, out string strokeId)
 		{
 			fillId = null;
+			strokeId = null;
 
 			// get current element opacity, but ignore for groups (special case)
 			float elementOpacity = isGroup ? 1.0f : ReadOpacity(style);
@@ -898,7 +987,32 @@ namespace SkiaSharp.Extended.Svg
 					if (strokePaint == null)
 						strokePaint = CreatePaint(true);
 
-					if (ColorHelper.TryParse(stroke, out SKColor color))
+					var strokeUrlM = urlRe.Match(stroke);
+
+					if (strokeUrlM.Success)
+					{
+						var id = strokeUrlM.Groups[1].Value.Trim();
+
+						if (defs.TryGetValue(id, out var defE))
+						{
+							switch (defE.Name.LocalName.ToLower())
+							{
+								case "lineargradient":
+								{
+									gradientDefs[id] = ReadGradientInfo(defE, false);
+									strokeId = id;
+									break;
+								}
+								case "radialgradient":
+								{
+									gradientDefs[id] = ReadGradientInfo(defE, true);
+									strokeId = id;
+									break;
+								}
+							}
+						}
+					}
+					else if (ColorHelper.TryParse(stroke, out SKColor color))
 					{
 						if (replacementColors.ContainsKey(color))
 							color = replacementColors[color];
@@ -1019,17 +1133,22 @@ namespace SkiaSharp.Extended.Svg
 								switch (defE.Name.LocalName.ToLower())
 								{
 									case "lineargradient":
+									{
 										fillDefs[id] = ReadLinearGradient(defE);
+										gradientDefs[id] = ReadGradientInfo(defE, false);
 										fillId = id;
 										read = true;
 										break;
+									}
 									case "radialgradient":
+									{
 										fillDefs[id] = ReadRadialGradient(defE);
+										gradientDefs[id] = ReadGradientInfo(defE, true);
 										fillId = id;
 										read = true;
 										break;
+									}
 								}
-								// else try another type (eg: image)
 							}
 							else
 							{
@@ -1302,6 +1421,34 @@ namespace SkiaSharp.Extended.Svg
 			return ReadNumber(value);
 		}
 
+		private SKSvgGradientInfo ReadGradientInfo(XElement e, bool in_IsRadial)
+		{
+			SKSvgGradientInfo info = new SKSvgGradientInfo();
+
+			info.IsRadial = in_IsRadial;
+			info.TileMode = ReadSpreadMethod(e);
+			info.Matrix = ReadTransform(e.Attribute("gradientTransform")?.Value ?? string.Empty);
+
+			info.IsBoundingBoxUnits = e.Attribute("gradientUnits")?.Value != "userSpaceOnUse";
+
+			if (in_IsRadial)
+			{
+				info.Center = new SKPoint(ReadNumber(e.Attribute("cx"), 0.5f), ReadNumber(e.Attribute("cy"), 0.5f));
+				info.Radius = ReadNumber(e.Attribute("r"), 0.5f);
+			}
+			else
+			{
+				info.Start = new SKPoint(ReadNumber(e.Attribute("x1"), 0f), ReadNumber(e.Attribute("y1"), 0f));
+				info.End = new SKPoint(ReadNumber(e.Attribute("x2"), 1f), ReadNumber(e.Attribute("y2"), 0f));
+			}
+
+			SortedDictionary<float, SKColor> stops = ReadStops(e);
+
+			info.Offsets = stops.Keys.ToArray();
+			info.Colors = stops.Values.ToArray();
+			return info;
+		}
+
 		private SKRadialGradient ReadRadialGradient(XElement e)
 		{
 			var center = new SKPoint(
@@ -1515,6 +1662,116 @@ namespace SkiaSharp.Extended.Svg
 			if (p.Length > 3)
 				r.Bottom = r.Top + ReadNumber(p[3]);
 			return r;
+		}
+	}
+
+	public class SKSvgGradientInfo
+	{
+		public bool IsRadial;
+		public bool IsBoundingBoxUnits = true;
+
+		public SKPoint Start;          // linear, gradient units
+		public SKPoint End;            // linear, gradient units
+		public SKPoint Center;         // radial, gradient units
+		public float Radius;           // radial, gradient units
+
+		public float[] Offsets;
+		public SKColor[] Colors;
+
+		public SKShaderTileMode TileMode = SKShaderTileMode.Clamp;
+		public SKMatrix Matrix = SKMatrix.CreateIdentity();
+
+		public SKRect Bounds;
+
+		public SKSvgGradientInfo WithBounds(SKRect in_Bounds)
+		{
+			SKSvgGradientInfo copy = new SKSvgGradientInfo();
+
+			copy.IsRadial = IsRadial;
+			copy.IsBoundingBoxUnits = IsBoundingBoxUnits;
+			copy.Start = Start;
+			copy.End = End;
+			copy.Center = Center;
+			copy.Radius = Radius;
+			copy.Offsets = Offsets;
+			copy.Colors = Colors;
+			copy.TileMode = TileMode;
+			copy.Matrix = Matrix;
+			copy.Bounds = in_Bounds;
+
+			return copy;
+		}
+
+		private SKPoint Resolve(SKPoint in_Point)
+		{
+			SKPoint p = Matrix.MapPoint(in_Point);
+
+			if (!IsBoundingBoxUnits)
+				return p;
+
+			return new SKPoint(Bounds.Left + p.X * Bounds.Width, Bounds.Top + p.Y * Bounds.Height);
+		}
+
+		public SKPoint ResolvedStart { get { return Resolve(Start); } }
+		public SKPoint ResolvedEnd { get { return Resolve(End); } }
+		public SKPoint ResolvedCenter { get { return Resolve(Center); } }
+
+		public float ResolvedRadius
+		{
+			get
+			{
+				if (!IsBoundingBoxUnits)
+					return Radius;
+
+				return Radius * (Bounds.Width + Bounds.Height) * 0.5f;
+			}
+		}
+
+		public SKColor SampleAt(float in_T)
+		{
+			if (Colors == null || Colors.Length == 0)
+				return new SKColor(0, 0, 0, 0);
+
+			if (Colors.Length == 1)
+				return Colors[0];
+
+			float t = in_T < 0f ? 0f : (in_T > 1f ? 1f : in_T);
+
+			if (t <= Offsets[0])
+				return Colors[0];
+
+			if (t >= Offsets[Offsets.Length - 1])
+				return Colors[Colors.Length - 1];
+
+			for (int i = 1; i < Offsets.Length; i++)
+			{
+				if (t > Offsets[i])
+					continue;
+
+				float span = Offsets[i] - Offsets[i - 1];
+				float k = span <= 0f ? 0f : (t - Offsets[i - 1]) / span;
+
+				SKColor a = Colors[i - 1];
+				SKColor b = Colors[i];
+
+				return new SKColor(
+					(byte)(a.Red + (b.Red - a.Red) * k),
+					(byte)(a.Green + (b.Green - a.Green) * k),
+					(byte)(a.Blue + (b.Blue - a.Blue) * k),
+					(byte)(a.Alpha + (b.Alpha - a.Alpha) * k));
+			}
+
+			return Colors[Colors.Length - 1];
+		}
+
+		public SKColor[] BuildRamp(int in_Count)
+		{
+			SKColor[] ramp = new SKColor[in_Count];
+
+			for (int i = 0; i < in_Count; i++)
+				ramp[i] = SampleAt(in_Count <= 1 ? 0f : (float)i / (in_Count - 1));
+
+			return ramp;
 		}
 	}
 }
